@@ -1,0 +1,15 @@
+{
+  "name": "codenavigator-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Desktop shell for CodeNavigator — ask your codebase in plain language.",
+  "scripts": {
+    "tauri": "tauri",
+    "dev": "tauri dev",
+    "build": "tauri build",
+    "icons": "tauri icon ui/icon.png"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2"
+  }
+}

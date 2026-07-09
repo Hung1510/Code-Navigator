@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CodeNavigator</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo">⌕</span>
+      <span class="name">CodeNavigator</span>
+    </div>
+    <div class="repo-field">
+      <input id="repo" type="text" placeholder="/path/to/your/repo" spellcheck="false" />
+      <button id="btn-index" class="ghost" title="Build / refresh the index">Index</button>
+    </div>
+  </header>
+
+  <section class="controls">
+    <div class="query-row">
+      <input id="query" type="text" placeholder="Ask your codebase… e.g. where is JWT refresh handled?" spellcheck="false" />
+      <button id="btn-run" class="primary">Run</button>
+    </div>
+    <div class="options">
+      <div class="seg" id="action-seg">
+        <button data-action="search" class="active">Search</button>
+        <button data-action="ask">Ask (LLM)</button>
+      </div>
+      <label class="opt">Mode
+        <select id="mode">
+          <option value="hybrid">hybrid</option>
+          <option value="vector">vector</option>
+          <option value="lexical">lexical</option>
+        </select>
+      </label>
+      <label class="opt check">
+        <input id="rerank" type="checkbox" checked /> re-rank
+      </label>
+      <label class="opt">k
+        <input id="topk" type="number" value="8" min="1" max="30" />
+      </label>
+    </div>
+  </section>
+
+  <div id="status" class="status hidden"></div>
+
+  <main id="results" class="results">
+    <div class="empty">
+      <p>Point at a repo, hit <strong>Index</strong> once, then ask away.</p>
+      <p class="muted">Search shows the retrieved code. Ask sends it to Claude for a grounded answer with citations.</p>
+    </div>
+  </main>
+
+  <script src="main.js"></script>
+</body>
+</html>

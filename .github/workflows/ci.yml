@@ -1,0 +1,62 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  # Fast, deterministic, no model download. Runs on every push/PR.
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: pip install -e ".[treesitter]" pytest
+      - name: Unit tests
+        run: python -m pytest -q
+
+  # Retrieval-quality gate: index a corpus, then fail the build if quality
+  # drops below the thresholds. Downloads the embedding model once (cached).
+  retrieval-quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: pip install -e ".[treesitter]"
+
+      # The embedding model (~130MB) is downloaded on first index and cached
+      # so later runs are fast. Adjust the paths if fastembed changes its cache.
+      - name: Cache embedding model
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/fastembed
+            ~/.cache/huggingface
+          key: codenavigator-embed-model-bge-small-v1
+
+      # Corpus = this project's own source. Swap for a fixed fixture repo if you
+      # want the numbers held perfectly constant across commits.
+      - name: Build index
+        run: python -m codenavigator index codenavigator
+
+      # CALIBRATE THESE after your first green run: run the eval locally, read
+      # the hybrid recall@10 / MRR, and set the floors ~10-15% below them so
+      # normal noise doesn't fail the build but a real regression does.
+      - name: Retrieval-quality gate
+        run: >
+          python -m codenavigator eval codenavigator
+          --kind name --max-items 120 -k 10
+          --check-mode hybrid
+          --fail-under "recall@10=0.60,mrr=0.35"
+
+      # Optional: uncomment to also gate the reranked pipeline (downloads a
+      # second ~80MB model). Or run curated questions:
+      #   --curated evals/your-repo.jsonl --kind both --rerank
+      #   --check-mode "hybrid+rerank" --fail-under "recall@10=0.7,mrr=0.5"

@@ -1,0 +1,35 @@
+[project]
+name = "codenavigator"
+version = "0.1.0"
+description = "CodeNavigator — ask your codebase in plain language (local RAG + code intelligence)."
+requires-python = ">=3.10"
+dependencies = [
+    "fastembed>=0.4",
+    "numpy>=1.24",
+    "anthropic>=0.40",
+]
+
+# Structure-aware chunking via real parse trees. Optional: without it,
+# CodeNavigator falls back to the regex heuristic. Precompiled wheels, no C compiler.
+[project.optional-dependencies]
+treesitter = [
+    "tree-sitter>=0.23",
+    "tree-sitter-python",
+    "tree-sitter-javascript",
+    "tree-sitter-typescript",
+    "tree-sitter-rust",
+    "tree-sitter-java",
+    "tree-sitter-c-sharp",
+    "tree-sitter-cpp",
+    "tree-sitter-go",
+]
+
+[project.scripts]
+codenav = "codenavigator.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["codenavigator"]

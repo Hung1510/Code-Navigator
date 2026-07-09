@@ -1,0 +1,26 @@
+# Curated eval set for smart-learning-advisor.
+# Paths are relative to the SLA repo root. Run with:
+# Tip: drop a .codenavigatorignore in the SLA repo with client-dist/, public/js/,
+#      client/public/js/ to skip duplicate built copies before indexing.
+#   codenav index /path/to/smart-learning-advisor
+#   codenav eval  /path/to/smart-learning-advisor --curated evals/smart-learning-advisor.jsonl --kind curated --rerank
+# Each line: {query, path, start_line, end_line}. The "_symbol" field is a human
+# hint and is ignored by the loader. Edit freely — these are a starting point.
+{"query": "how does it decide which courses I can take next semester?", "path": "planner-core.js", "start_line": 114, "end_line": 176, "_symbol": "planNextSemester"}
+{"query": "where are the remaining degree requirements computed?", "path": "planner-core.js", "start_line": 218, "end_line": 304, "_symbol": "degreeAudit"}
+{"query": "how are elective slots tracked as filled or remaining?", "path": "planner-core.js", "start_line": 179, "end_line": 213, "_symbol": "electiveStatus"}
+{"query": "how is the prerequisite map built from the course links?", "path": "planner-core.js", "start_line": 69, "end_line": 77, "_symbol": "buildPrereqMap"}
+{"query": "how is a letter grade converted to grade points for GPA?", "path": "planner-core.js", "start_line": 34, "end_line": 37, "_symbol": "gradePoint"}
+{"query": "how is a raw numeric score turned into a letter grade?", "path": "app.js", "start_line": 347, "end_line": 377, "_symbol": "letterGrade"}
+{"query": "where is the raw EIU API response mapped into the student model?", "path": "app.js", "start_line": 387, "end_line": 434, "_symbol": "mapEIUDataToStudent"}
+{"query": "how is the context for the AI advisor assembled from the student data?", "path": "api-routes.js", "start_line": 31, "end_line": 80, "_symbol": "buildAdvisorContext"}
+{"query": "where does it generate personalized academic advice?", "path": "app.js", "start_line": 588, "end_line": 624, "_symbol": "generatePersonalizedAdvice"}
+{"query": "how does the app fetch a student's record from the EIU system?", "path": "app.js", "start_line": 498, "end_line": 537, "_symbol": "fetchStudentFromEIU"}
+{"query": "how is API rate limiting implemented?", "path": "app.js", "start_line": 176, "end_line": 197, "_symbol": "rateLimit"}
+{"query": "where is a student's data precomputed and cached?", "path": "app.js", "start_line": 232, "end_line": 316, "_symbol": "precomputeStudentData"}
+{"query": "how does the response cache expire entries?", "path": "app.js", "start_line": 158, "end_line": 161, "_symbol": "getCached"}
+{"query": "how does the Python service log in with Google and save the session?", "path": "python-service/Eiu_student.py", "start_line": 146, "end_line": 175, "_symbol": "login_google_and_save_session"}
+{"query": "how does the service obtain the auth token and cookies for a student?", "path": "python-service/Eiu_student.py", "start_line": 79, "end_line": 141, "_symbol": "get_token_and_cookies"}
+{"query": "how does the FastAPI service authenticate to AAO with an access token?", "path": "python-service/main.py", "start_line": 138, "end_line": 193, "_symbol": "_login_aao_with_access_token"}
+{"query": "where are authenticated routes protected from unauthenticated users?", "path": "client/src/components/ProtectedRoute.jsx", "start_line": 6, "end_line": 11, "_symbol": "ProtectedRoute"}
+{"query": "how is logout handled in the app layout?", "path": "client/src/components/AppLayout.jsx", "start_line": 20, "end_line": 24, "_symbol": "AppLayout.handleLogout"}
