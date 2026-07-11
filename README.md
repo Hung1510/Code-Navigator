@@ -2,7 +2,7 @@
 
 # 🧭 CodeNavigator
 
-**A local, MCP-native context engine for your codebase — so your AI assistant stops guessing.**
+**A local, MCP-native context engine for your codebase - so your AI assistant stops guessing.**
 
 [![CI](https://github.com/Hung1510/Code-Navigator/actions/workflows/ci.yml/badge.svg)](https://github.com/Hung1510/Code-Navigator/actions/workflows/ci.yml)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
@@ -14,7 +14,7 @@
 </div>
 
 Plug it into **Claude Desktop, Claude Code, Cursor, or Continue** and your
-assistant gets precise, cited context from your repo — instead of grepping around
+assistant gets precise, cited context from your repo - instead of grepping around
 and dumping whole files into its context window. Or use it standalone: ask
 *"where's the JWT refresh handled?"* or *"what calls `issue_jwt`?"* from the CLI
 and get answers with `file:line` citations.
@@ -32,14 +32,14 @@ one sitting, structured so every piece is swappable as you go deeper.
 
 ### Highlights
 
-- 🔌 **MCP context engine** — plug it into Claude Desktop / Claude Code / Cursor / Continue and your assistant gets precise, cited context instead of grepping and dumping whole files
-- 🔍 **Hybrid retrieval** — semantic embeddings + BM25 keyword search, fused with Reciprocal Rank Fusion, then cross-encoder re-ranked
+- 🔌 **MCP context engine** - plug it into Claude Desktop / Claude Code / Cursor / Continue and your assistant gets precise, cited context instead of grepping and dumping whole files
+- 🔍 **Hybrid retrieval** - semantic embeddings + BM25 keyword search, fused with Reciprocal Rank Fusion, then cross-encoder re-ranked
 - 🌳 **Structure-aware chunking** via tree-sitter (Python, JS, TS/TSX, Rust, Java, C#, C++, Go) with a regex fallback
-- 🧠 **Code intelligence** — `defs` / `callers` / `callees`, plus graph-aware answers that pull in the code your matches actually call
-- 💥 **Impact analysis** — `impact` walks the call graph *transitively*: what breaks if you change this signature, not just who calls it directly
-- 🧪 **Symbol → tests** — `tests` maps a function to the tests that reach it, **and the call chain that gets them there**. Neither is something grep or a vector store can give you
-- ⚡ **Incremental indexing** — hashes files, re-embeds only what changed
-- 📊 **Eval harness** — recall@k / MRR across modes, `--scaffold` for curated sets, `--fail-under` CI gate
+- 🧠 **Code intelligence** - `defs` / `callers` / `callees`, plus graph-aware answers that pull in the code your matches actually call
+- 💥 **Impact analysis** - `impact` walks the call graph *transitively*: what breaks if you change this signature, not just who calls it directly
+- 🧪 **Symbol → tests** - `tests` maps a function to the tests that reach it, **and the call chain that gets them there**. Neither is something grep or a vector store can give you
+- ⚡ **Incremental indexing** - hashes files, re-embeds only what changed
+- 📊 **Eval harness** - recall@k / MRR across modes, `--scaffold` for curated sets, `--fail-under` CI gate
 - 🖥️ **CLI + desktop app** (Tauri) over one shared engine
 
 ## 🔌 Use it as an MCP context engine
@@ -47,7 +47,7 @@ one sitting, structured so every piece is swappable as you go deeper.
 This is the main event. Plug CodeNavigator into any MCP host and your AI
 assistant stops grepping around your filesystem and dumping whole files into its
 context. Instead it asks one question and gets a handful of ranked, deduplicated
-chunks with `path:line` citations — plus the code those matches actually *call*,
+chunks with `path:line` citations - plus the code those matches actually *call*,
 via the call graph.
 
 **It returns context, not answers.** The host's model does the reasoning, so the
@@ -77,7 +77,7 @@ Settings → Developer → Edit Config, then add:
 
 On Windows use the full interpreter path, e.g.
 `"command": "D:\\Project_Programming\\CodeNavigator\\.venv\\Scripts\\python.exe"`.
-Use **absolute paths** — the host spawns the server as a subprocess and won't
+Use **absolute paths** - the host spawns the server as a subprocess and won't
 resolve `python` from your shell's PATH. Restart the host after editing.
 
 ### Claude Code
@@ -90,7 +90,7 @@ claude mcp add codenavigator \
 
 ### Cursor / Continue / VS Code Copilot Agent
 
-Same shape — point the host's MCP config (`~/.cursor/mcp.json` for Cursor) at
+Same shape - point the host's MCP config (`~/.cursor/mcp.json` for Cursor) at
 the same command, args, and `CODENAVIGATOR_REPO` env var.
 
 ### Tools it exposes
@@ -98,9 +98,9 @@ the same command, args, and `CODENAVIGATOR_REPO` env var.
 | Tool | What it's for |
 |---|---|
 | `search_code(query, k)` | Find code by meaning. Replaces grep + reading N files. |
-| `ask_codebase(question, k)` | Same, plus call-graph expansion — the implementation, not just the match. |
+| `ask_codebase(question, k)` | Same, plus call-graph expansion - the implementation, not just the match. |
 | `get_definition(symbol)` | Where a function/class is defined. |
-| `find_callers(symbol)` | Direct call sites — one hop. |
+| `find_callers(symbol)` | Direct call sites - one hop. |
 | `analyze_impact(symbol, depth)` | **Blast radius**: everything that *transitively* reaches it, with the chain, and an explicit uncertainty flag per result. |
 | `find_tests(symbol, depth)` | **Which tests exercise it**, and via what call chain. |
 | `find_callees(symbol)` | What an implementation depends on. |
@@ -117,7 +117,7 @@ locator, so the model can always read further if it needs to.
 | `CODENAVIGATOR_MAX_CHUNK_CHARS` | `1800` | Per-chunk truncation cap |
 | `CODENAVIGATOR_RERANK` | `1` | Set `0` to skip the cross-encoder |
 
-**On "token savings":** retrieval doesn't beat a well-scoped question — it beats
+**On "token savings":** retrieval doesn't beat a well-scoped question - it beats
 the agent loop where the model greps, reads five files, and pastes them whole.
 That's where the savings are, and that's the honest pitch: *precision context*.
 
@@ -137,7 +137,7 @@ codenav index /path/to/your/repo
 codenav index /path/to/your/repo            # fast: skips unchanged files
 codenav index /path/to/your/repo --full     # rebuild everything
 
-# 2a. Retrieval only — no API key needed, great for seeing what RAG returns
+# 2a. Retrieval only - no API key needed, great for seeing what RAG returns
 codenav search /path/to/your/repo "where is the jwt refresh token handled"
 codenav search /path/to/repo "refreshToken" --mode lexical   # exact identifier
 codenav search /path/to/repo "auth flow" --mode vector       # semantic only
@@ -149,12 +149,12 @@ codenav ask /path/to/your/repo "how does auth refresh work? cite files"
 codenav ask /path/to/repo "..." --no-rerank    # skip the cross-encoder stage
 ```
 
-The index lives in `<repo>/.codenavigator/` — add that to your global gitignore.
+The index lives in `<repo>/.codenavigator/` - add that to your global gitignore.
 Prefer a GUI? See `desktop/` for a Tauri app over this same engine.
 
 ### Excluding built or vendored copies
 
-Duplicated build output (bundled JS, `dist/` copies) pollutes retrieval — the
+Duplicated build output (bundled JS, `dist/` copies) pollutes retrieval - the
 index keeps returning duplicate copies instead of the source. Drop a
 `.codenavigatorignore` (gitignore-flavored) at the repo root to keep them out:
 
@@ -169,7 +169,7 @@ client/public/js/
 
 ### Code intelligence (call graph)
 
-Structural questions, no embeddings or API key needed — built during `index`:
+Structural questions, no embeddings or API key needed - built during `index`:
 
 ```bash
 codenav defs    /path/to/repo AuthService.login   # where is it defined
@@ -179,14 +179,14 @@ codenav callees /path/to/repo AuthService.login   # what it calls
 # Transitive: what breaks if I change this?
 codenav impact  /path/to/repo issue_jwt --depth 3
 
-# Which tests reach it — and through which helpers?
+# Which tests reach it - and through which helpers?
 codenav tests   /path/to/repo issue_jwt
 ```
 
 ### What did *I* just break? (`--diff`)
 
 Nobody wakes up wondering what calls `issue_jwt`. They wonder: **I changed five
-files — what did I put at risk, and what should I run?** `--diff` maps your git
+files - what did I put at risk, and what should I run?** `--diff` maps your git
 diff onto the call graph and answers that:
 
 ```bash
@@ -201,7 +201,7 @@ Diff touches 1 file(s) -> 1 changed symbol(s):
   issue_jwt                                core.py:1-2
 
 Changing issue_jwt  (core.py:1-2)
-  3 symbol(s) affected within 3 hop(s)  —  1 test(s), 0 uncertain
+  3 symbol(s) affected within 3 hop(s)  -  1 test(s), 0 uncertain
 
   depth 1:
       login                                      svc.py:3
@@ -215,7 +215,7 @@ Two things it refuses to do:
 - **It won't map a diff onto a stale index.** Diff line numbers describe the
   working tree; symbol spans come from the index. If you edited a file after
   indexing, the spans have shifted and "line 47" now points at the wrong
-  function — an answer that looks completely reasonable and is wrong. It
+  function - an answer that looks completely reasonable and is wrong. It
   detects this and tells you to re-index instead of guessing.
 - **It won't call the test list sufficient.** These are the tests that
   *statically call* your changed code. Anything driven over HTTP, through DI,
@@ -237,7 +237,7 @@ codenav eval /path/to/repo --curated q.jsonl --kind both
 ```
 
 Prints recall@1, recall@k, and MRR per mode (`vector`, `lexical`, `hybrid`,
-optionally `hybrid+rerank`). The auto benchmark needs no labeling — it turns
+optionally `hybrid+rerank`). The auto benchmark needs no labeling - it turns
 each function name into a query and uses that function as the gold answer.
 For realistic questions, write a curated JSONL (one object per line):
 
@@ -246,13 +246,13 @@ For realistic questions, write a curated JSONL (one object per line):
 ```
 
 Read the name-based numbers as "can it map a concept phrase to the right
-function" — the name's words appear in the code, which favors keyword search,
+function" - the name's words appear in the code, which favors keyword search,
 so use a curated set for the cleanest semantic comparison. Example run (lexical
 only, real BM25) across a few repos: recall@10 lands 0.94–1.0, but recall@1
-varies a lot by repo — low recall@1 with high recall@10 is the signature of
+varies a lot by repo - low recall@1 with high recall@10 is the signature of
 similarly-named symbols, and the repo where semantic retrieval helps most.
 
-**Scaffold a curated set** so you're not starting from a blank file — it emits
+**Scaffold a curated set** so you're not starting from a blank file - it emits
 template rows for the repo's meatier functions with real paths/lines to attach
 questions to:
 
@@ -264,7 +264,7 @@ codenav eval /path/to/repo --scaffold --max-items 30 > evals/myrepo.jsonl
 A starter curated set for smart-learning-advisor lives in
 `evals/smart-learning-advisor.jsonl` (18 hand-written questions).
 
-**Gate CI on retrieval quality** — fail the build when a change regresses it:
+**Gate CI on retrieval quality** - fail the build when a change regresses it:
 
 ```bash
 codenav eval /path/to/repo --check-mode hybrid \
@@ -273,7 +273,7 @@ codenav eval /path/to/repo --check-mode hybrid \
 
 `.github/workflows/ci.yml` wires this up: one job runs the unit tests, a second
 indexes a corpus and runs the gate (calibrate the thresholds after the first
-green run — set them ~10–15% below your observed numbers).
+green run - set them ~10–15% below your observed numbers).
 
 ## How it works (the four moving parts)
 
@@ -285,7 +285,7 @@ green run — set them ~10–15% below your observed numbers).
                                  (BM25)
 ```
 
-- **`chunker.py` + `treesitter.py`** — structure-aware splitting. With the
+- **`chunker.py` + `treesitter.py`** - structure-aware splitting. With the
   `treesitter` extra installed, files are parsed into real syntax trees:
   callables are emitted whole (decorators/`export` included, nested closures
   kept with their parent), and containers are split into a header chunk plus
@@ -293,38 +293,38 @@ green run — set them ~10–15% below your observed numbers).
   Without the extra, it falls back to a dependency-free regex heuristic. Both
   produce identical `Chunk` objects. Supported grammars: Python, JS, TS/TSX,
   Rust, Java, C#, C++, Go. *This is where 80% of retrieval quality is won.*
-- **`embedder.py`** — wraps [fastembed](https://github.com/qdrant/fastembed)
+- **`embedder.py`** - wraps [fastembed](https://github.com/qdrant/fastembed)
   (ONNX, CPU, no PyTorch). Default `BAAI/bge-small-en-v1.5`, 384-dim. Uses
   BGE's query/passage prefixes, which measurably improves retrieval.
-- **`store.py`** — a vector store you can see through: unit vectors in a numpy
+- **`store.py`** - a vector store you can see through: unit vectors in a numpy
   matrix, metadata in SQLite, "search" is one dot product + argsort. This is
   what a vector DB *is*, minus the marketing.
-- **`lexical.py` + hybrid retrieval** — a hand-rolled BM25 keyword index with a
+- **`lexical.py` + hybrid retrieval** - a hand-rolled BM25 keyword index with a
   code-aware tokenizer (splits `refreshToken`/`refresh_token` into subwords).
   By default `query.py` runs both vector and BM25 search and fuses them with
   Reciprocal Rank Fusion, so semantic questions *and* exact identifier lookups
   both land. Choose one with `--mode vector|lexical|hybrid`.
-- **`rerank.py` — two-stage retrieval.** An optional ONNX cross-encoder
+- **`rerank.py` - two-stage retrieval.** An optional ONNX cross-encoder
   re-scores the fused top ~30 candidates by reading query+chunk *together*, then
   keeps the best k. On by default; skip with `--no-rerank`. Falls back to the
   fused order if the model isn't available.
-- **`index.py`** — builds the index **incrementally**. It hashes every source
+- **`index.py`** - builds the index **incrementally**. It hashes every source
   file and compares against the `{path: hash}` manifest from the last run, so
   only changed, new, or deleted files are re-chunked and re-embedded. Embedding
   is the one expensive step; everything else is cheap, so a re-index after a
   small edit is near-instant. Switching embedding models triggers a full
   rebuild automatically (mixing vectors from two models would corrupt search).
-- **`callgraph.py` — code intelligence.** Reuses the tree-sitter parse to
+- **`callgraph.py` - code intelligence.** Reuses the tree-sitter parse to
   extract definitions and call sites, then resolves each call to its
   definition: exact within a file, name-based across files (reporting *all*
   candidates when ambiguous rather than guessing). Powers the `defs`, `callers`,
-  and `callees` commands — and **graph-aware `ask`**: retrieval finds the code a
+  and `callees` commands - and **graph-aware `ask`**: retrieval finds the code a
   question is about, then the graph pulls in the code that code *calls* (marked
   `\u2190 called by X`), so the LLM answers from the real implementation, not
   just lexical look-alikes. On by default for `ask`; `--no-expand` to disable.
-- **`llm.py`** — hands retrieved chunks to Claude with a strict "answer only
+- **`llm.py`** - hands retrieved chunks to Claude with a strict "answer only
   from context, cite locators" prompt.
-- **`desktop/`** — a Tauri 2 desktop app over this engine (Rust backend runs the
+- **`desktop/`** - a Tauri 2 desktop app over this engine (Rust backend runs the
   CLI with `--json`, static web frontend renders it). See `desktop/README.md`.
 
 ## Verify it works (offline, no downloads)
@@ -338,42 +338,42 @@ runs with no network and no API key.
 
 ## Where to grow it (in rough order of payoff)
 
-1. ~~Tree-sitter chunking~~ — **done** (`treesitter.py`). Next grammar-side win:
+1. ~~Tree-sitter chunking~~ - **done** (`treesitter.py`). Next grammar-side win:
    capture interspersed top-level statements between defs, and add
    `type_alias`/`record` node types where you need them.
-2. ~~Incremental indexing~~ — **done** (`index.py`). Next: the store still
+2. ~~Incremental indexing~~ - **done** (`index.py`). Next: the store still
    rewrites `vectors.npy` in full on each save; append-only persistence would
    make large-repo writes cheaper too.
-3. ~~Hybrid retrieval~~ — **done** (`lexical.py`, RRF fusion in `query.py`).
-4. ~~Cross-encoder re-ranker~~ — **done** (`rerank.py`, two-stage in `query.py`).
-5. ~~Desktop shell~~ — **done** (`desktop/`, Tauri 2 over the CLI).
-6. ~~Call graph / code intelligence~~ — **done** (`callgraph.py`: `defs`,
+3. ~~Hybrid retrieval~~ - **done** (`lexical.py`, RRF fusion in `query.py`).
+4. ~~Cross-encoder re-ranker~~ - **done** (`rerank.py`, two-stage in `query.py`).
+5. ~~Desktop shell~~ - **done** (`desktop/`, Tauri 2 over the CLI).
+6. ~~Call graph / code intelligence~~ - **done** (`callgraph.py`: `defs`,
    `callers`, `callees`). Next: import-aware resolution to disambiguate
    cross-file candidates, and receiver-type tracking for method calls.
-7. ~~Graph-aware `ask`~~ — **done** (`_expand_with_graph` in `query.py`): the
+7. ~~Graph-aware `ask`~~ - **done** (`_expand_with_graph` in `query.py`): the
    top hits' callees are pulled into the LLM context. Next: expand callers too
    for "impact of changing X" questions, and go one hop deeper when budget allows.
-8. ~~Evaluation harness~~ — **done** (`eval.py`: `codenav eval`, recall@k / MRR
+8. ~~Evaluation harness~~ - **done** (`eval.py`: `codenav eval`, recall@k / MRR
    across modes; `--scaffold` for curated templates; `--fail-under` CI gate in
    `.github/workflows/ci.yml`). Next: a docstring->code dataset (less name
    leakage) and per-query drill-down to see *what* each mode misses.
-9. ~~Exclude built/vendored copies from indexing~~ — **done**
+9. ~~Exclude built/vendored copies from indexing~~ - **done**
    (`.codenavigatorignore`, gitignore-flavored, honored by indexing, the call
    graph, and eval). Duplicate copies are a measurable recall drag.
-10. **Swap the store** — LanceDB/Qdrant behind the `VectorStore` interface once
+10. **Swap the store** - LanceDB/Qdrant behind the `VectorStore` interface once
     you outgrow brute-force numpy (~50k+ chunks).
-11. **Desktop graph panel + streaming progress** — expose the graph verbs in the
+11. **Desktop graph panel + streaming progress** - expose the graph verbs in the
     Tauri app (the `--json` output is ready) and stream index progress as events.
 
 ## Known limitations (tree-sitter path)
 
 - **`impact` and `tests` are heuristics, and I'd rather you know how they fail
   than be impressed by them.** Cross-file call resolution is name-based, not
-  type-aware — there's no compiler here. Two consequences, both surfaced in the
+  type-aware - there's no compiler here. Two consequences, both surfaced in the
   output rather than hidden:
   - *Over-reporting.* If several files define `save`, a call to `save` resolves
     to all of them. Results reached that way are marked `?`, and the doubt is
-    **inherited** by everything downstream — error compounds with `--depth`, so
+    **inherited** by everything downstream - error compounds with `--depth`, so
     the tree can't quietly launder a guess into a fact three hops later.
   - *Under-reporting.* Dynamic dispatch, reflection, DI containers, HTTP routes
     and mocks leave no static call edge. So an empty `impact` result does **not**
@@ -390,6 +390,6 @@ runs with no network and no API key.
 
 | Env var | Default | Purpose |
 |---|---|---|
-| `ANTHROPIC_API_KEY` | — | required for `ask` |
+| `ANTHROPIC_API_KEY` | - | required for `ask` |
 | `CODENAVIGATOR_MODEL` | `claude-sonnet-5` | answer model |
 | `--model` flag | `BAAI/bge-small-en-v1.5` | embedding model |
