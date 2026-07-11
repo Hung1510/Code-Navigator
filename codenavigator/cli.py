@@ -18,9 +18,10 @@ import sys
 from pathlib import Path
 
 
-def _embedder(model: str | None):
-    from .embedder import DEFAULT_MODEL, FastEmbedder
-    return FastEmbedder(model_name=model or DEFAULT_MODEL)
+def _embedder(model: str | None, prefix: str | None = None):
+    from .embedder import DEFAULT_MODEL, DEFAULT_PREFIX, FastEmbedder
+    return FastEmbedder(model_name=model or DEFAULT_MODEL,
+                        prefix=prefix or DEFAULT_PREFIX)
 
 
 def _reranker(enabled: bool, model: str | None):
@@ -62,7 +63,7 @@ def cmd_eval(args) -> int:
         raise SystemExit("Empty eval dataset.")
 
     reranker = _reranker(args.rerank, args.rerank_model)
-    report = evaluate(repo, dataset, _embedder(args.model), k=args.k,
+    report = evaluate(repo, dataset, _embedder(args.model, getattr(args, 'prefix', None)), k=args.k,
                       reranker=reranker, progress=lambda m: print(m, file=sys.stderr))
     if args.json:
         print(_json.dumps(report))
@@ -99,7 +100,7 @@ def cmd_eval(args) -> int:
 
 def cmd_index(args) -> int:
     from .index import build_index
-    build_index(Path(args.repo), _embedder(args.model),
+    build_index(Path(args.repo), _embedder(args.model, getattr(args, 'prefix', None)),
                 batch_size=args.batch, force=args.full, build_graph=not args.no_graph)
     return 0
 
@@ -172,6 +173,79 @@ def cmd_callers(args) -> int:
     return 0
 
 
+def cmd_impact(args) -> int:
+    """Blast radius: everything that transitively reaches this symbol."""
+    g = _load_graph_or_exit(args.repo)
+    matches = _match_or_report(g, args.symbol) if not args.json else g.find(args.symbol)
+    if not matches:
+        if args.json:
+            print(json.dumps([]))
+        return 0
+
+    results = [g.impact(m.id, max_depth=args.depth) for m in matches]
+    if args.json:
+        print(json.dumps([r.to_dict() for r in results]))
+        return 0
+
+    for res in results:
+        n_tests = sum(1 for x in res.nodes if x.is_test)
+        print(f"\nChanging {res.root.qualified}  ({res.root.locator()})")
+        print(f"  {len(res.nodes)} symbol(s) affected within {args.depth} hop(s)"
+              f"  —  {n_tests} test(s), {res.uncertain_count} uncertain")
+        if not res.nodes:
+            print("  Nothing calls it. Safe to change (or it's dead code — "
+                  "or it's reached dynamically, which this graph can't see).")
+        by_depth: dict[int, list] = {}
+        for n in res.nodes:
+            by_depth.setdefault(n.depth, []).append(n)
+        for d in sorted(by_depth):
+            print(f"\n  depth {d}:")
+            for n in sorted(by_depth[d], key=lambda x: (x.path, x.call_line)):
+                mark = " ?" if n.uncertain else "  "
+                tag = " [test]" if n.is_test else ""
+                print(f"   {mark} {n.qualified:<42} {n.path}:{n.call_line}{tag}")
+        if res.uncertain_count:
+            print(f"\n  ? = reached via a name that matches several definitions. "
+                  f"Cross-file resolution here is name-based, so these are "
+                  f"candidates, not facts.")
+        if res.truncated:
+            print(f"  Frontier still growing at depth {args.depth}; "
+                  f"re-run with --depth {args.depth + 1} to see further.")
+    print()
+    return 0
+
+
+def cmd_tests(args) -> int:
+    """Which tests demonstrably call this symbol, and via what chain."""
+    g = _load_graph_or_exit(args.repo)
+    matches = _match_or_report(g, args.symbol) if not args.json else g.find(args.symbol)
+    if not matches:
+        if args.json:
+            print(json.dumps([]))
+        return 0
+
+    results = [g.tests_for(m.id, max_depth=args.depth) for m in matches]
+    if args.json:
+        print(json.dumps([r.to_dict() for r in results]))
+        return 0
+
+    for res in results:
+        print(f"\nTests reaching {res.root.qualified}  ({res.root.locator()})")
+        if not res.nodes:
+            print("  None found. That does NOT mean it's untested — tests that "
+                  "drive it over HTTP, through DI, or via mocks leave no static "
+                  "call edge.")
+            continue
+        for n in sorted(res.nodes, key=lambda x: (x.path, x.call_line)):
+            mark = " ?" if n.uncertain else "  "
+            print(f"   {mark} {n.path}:{n.call_line}  {n.qualified}")
+            chain = res.chain(n)
+            if len(chain) > 1:
+                print(f"        via {' → '.join(reversed(chain))}")
+    print()
+    return 0
+
+
 def cmd_callees(args) -> int:
     g = _load_graph_or_exit(args.repo)
     matches = _match_or_report(g, args.symbol) if not args.json else g.find(args.symbol)
@@ -205,7 +279,7 @@ def cmd_callees(args) -> int:
 def cmd_ask(args) -> int:
     from .query import retrieve
     from .llm import answer as llm_answer
-    hits = retrieve(Path(args.repo), args.question, _embedder(args.model),
+    hits = retrieve(Path(args.repo), args.question, _embedder(args.model, getattr(args, 'prefix', None)),
                     k=args.k, mode=args.mode,
                     reranker=_reranker(not args.no_rerank, args.rerank_model),
                     graph_expand=not args.no_expand)
@@ -219,7 +293,7 @@ def cmd_ask(args) -> int:
 
 def cmd_search(args) -> int:
     from .query import retrieve
-    hits = retrieve(Path(args.repo), args.question, _embedder(args.model),
+    hits = retrieve(Path(args.repo), args.question, _embedder(args.model, getattr(args, 'prefix', None)),
                     k=args.k, mode=args.mode,
                     reranker=_reranker(not args.no_rerank, args.rerank_model))
     if args.json:
@@ -246,6 +320,10 @@ def _add_retrieval_flags(p) -> None:
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="codenav", description="Ask your codebase in plain language.")
     p.add_argument("--model", help="embedding model name (default BAAI/bge-small-en-v1.5)")
+    p.add_argument("--prefix", choices=("bge", "e5", "none"), default=None,
+                   help="instruction-prefix scheme for queries/passages "
+                        "(default: bge, matching the default model). Changing "
+                        "this forces a full re-index.")
     sub = p.add_subparsers(dest="cmd", required=True)
 
     pi = sub.add_parser("index", help="build/refresh the index for a repo")
@@ -280,11 +358,17 @@ def build_parser() -> argparse.ArgumentParser:
         ("defs", cmd_defs, "where a symbol is defined"),
         ("callers", cmd_callers, "what calls a symbol"),
         ("callees", cmd_callees, "what a symbol calls"),
+        ("impact", cmd_impact, "blast radius: what breaks if you change a symbol"),
+        ("tests", cmd_tests, "which tests reach a symbol, and via what chain"),
     ):
         pg = sub.add_parser(verb, help=helptext)
         pg.add_argument("repo")
         pg.add_argument("symbol")
         pg.add_argument("--json", action="store_true", help="emit JSON")
+        if verb in ("impact", "tests"):
+            pg.add_argument("--depth", type=int, default=3 if verb == "impact" else 4,
+                            help="how many call hops to walk outward "
+                                 "(deeper = wider net, more false positives)")
         pg.set_defaults(func=fn)
 
     pa = sub.add_parser("ask", help="ask a question (retrieval + Claude)")

@@ -227,9 +227,111 @@ def get_definition(symbol: str) -> str:
 
 
 @mcp.tool()
+def analyze_impact(symbol: str, depth: int = 3) -> str:
+    """Blast radius of a change: everything that TRANSITIVELY reaches a symbol,
+    not just its direct callers. Use before editing a function's signature or
+    behaviour, to answer "what breaks if I change this".
+
+    Prefer this over find_callers when the question is about consequences.
+    find_callers is one hop; this walks the call graph outward and shows the
+    chain by which each caller is implicated.
+
+    Reliability: cross-file resolution is name-based, not type-aware. Results
+    marked [?] were reached through a name that matches several definitions, so
+    they are candidates rather than facts, and that uncertainty is inherited by
+    everything downstream of them. Treat a [?] result as "check this", not
+    "this breaks". Dynamic dispatch, reflection and DI are invisible here, so
+    the set can also be INCOMPLETE. Do not tell the user a change is safe on the
+    strength of an empty result.
+
+    Args:
+        symbol: A name like "issue_jwt" or "AuthService.login".
+        depth: Call hops to walk outward. More depth = wider net, more noise.
+    """
+    err = _ensure_index()
+    if err:
+        return err
+    graph = load_graph(index_dir_for(REPO))
+    if graph is None:
+        return "No call graph available. Re-index the repository."
+    matches = graph.find(symbol)
+    if not matches:
+        return f"No definition named {symbol!r} found."
+
+    out: list[str] = []
+    for tgt in matches:
+        res = graph.impact(tgt.id, max_depth=depth)
+        n_tests = sum(1 for n in res.nodes if n.is_test)
+        out.append(f"Changing {res.root.qualified} ({res.root.locator()}): "
+                   f"{len(res.nodes)} affected symbol(s) within {depth} hop(s), "
+                   f"{n_tests} test(s), {res.uncertain_count} uncertain.")
+        if not res.nodes:
+            out.append("  Nothing statically calls it. It may be dead code, or "
+                       "reached dynamically — this graph cannot tell the two apart.")
+        for n in sorted(res.nodes, key=lambda x: (x.depth, x.path, x.call_line)):
+            mark = "[?] " if n.uncertain else ""
+            tag = " [test]" if n.is_test else ""
+            chain = " -> ".join(reversed(res.chain(n)))
+            out.append(f"  {mark}depth {n.depth}: {n.qualified} "
+                       f"at {n.path}:{n.call_line}{tag}\n      via {chain}")
+        if res.truncated:
+            out.append(f"  (Frontier still growing at depth {depth} — the true "
+                       f"blast radius is larger than what is shown.)")
+    return "\n".join(out)
+
+
+@mcp.tool()
+def find_tests(symbol: str, depth: int = 4) -> str:
+    """Find which tests exercise a symbol, and the call chain that gets them
+    there. Use to decide what to run after a change, or to check whether code
+    you are about to modify is covered at all.
+
+    Reliability: this finds tests that STATICALLY CALL the symbol, directly or
+    through helpers. A test that drives it over HTTP, through a DI container, a
+    mock, or a framework fixture leaves no call edge and will NOT appear.
+    An empty result is weak evidence of missing coverage, not proof of it —
+    say so rather than telling the user their code is untested.
+
+    Args:
+        symbol: A name like "issue_jwt" or "AuthService.login".
+        depth: Call hops to walk. Tests often reach code via setup helpers.
+    """
+    err = _ensure_index()
+    if err:
+        return err
+    graph = load_graph(index_dir_for(REPO))
+    if graph is None:
+        return "No call graph available. Re-index the repository."
+    matches = graph.find(symbol)
+    if not matches:
+        return f"No definition named {symbol!r} found."
+
+    out: list[str] = []
+    for tgt in matches:
+        res = graph.tests_for(tgt.id, max_depth=depth)
+        if not res.nodes:
+            out.append(f"No test statically calls {tgt.qualified} "
+                       f"({tgt.locator()}) within {depth} hop(s). This is not "
+                       f"proof it is untested — see the tool description.")
+            continue
+        out.append(f"{len(res.nodes)} test(s) reach {tgt.qualified} "
+                   f"({tgt.locator()}):")
+        for n in sorted(res.nodes, key=lambda x: (x.path, x.call_line)):
+            mark = "[?] " if n.uncertain else ""
+            chain = " -> ".join(reversed(res.chain(n)))
+            out.append(f"  {mark}{n.path}:{n.call_line}  {n.qualified}\n"
+                       f"      via {chain}")
+    return "\n".join(out)
+
+
+@mcp.tool()
 def find_callers(symbol: str) -> str:
-    """Find every place that CALLS a symbol. Use for impact analysis:
-    "what breaks if I change X", "who uses this function".
+    """Find the DIRECT call sites of a symbol — one hop only. Use for "who uses
+    this function".
+
+    For "what breaks if I change this", use analyze_impact instead: a caller two
+    hops away breaks just as hard as a caller one hop away, and this tool will
+    not show it to you.
 
     Cross-file resolution is name-based, so if several files define the same
     name, call sites for all of them are reported.

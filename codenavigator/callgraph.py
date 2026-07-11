@@ -87,6 +87,110 @@ class CallEdge:
                 "path": self.path, "line": self.line, "resolved": self.resolved}
 
 
+# ---------------------------------------------------------------------------
+# Test detection
+#
+# There is no language-agnostic way to know what a test is, so we use each
+# ecosystem's own naming convention — the same signal the test runners use.
+# It's a heuristic and it will miss things (a test suite in an oddly-named
+# directory, a Rust `#[cfg(test)] mod tests` inside a production file is caught
+# by the qualified-name rule, but an integration test driven over HTTP is not).
+# ---------------------------------------------------------------------------
+
+_TEST_DIRS = {"test", "tests", "__tests__", "spec", "specs", "testing", "e2e"}
+_TEST_SUFFIXES = (
+    "_test.py", "_test.go", "_test.rs", "_test.java", "_test.ts", "_test.js",
+    ".test.ts", ".test.tsx", ".test.js", ".test.jsx",
+    ".spec.ts", ".spec.tsx", ".spec.js", ".spec.jsx",
+    "test.java", "tests.cs", "test.cs", "_spec.rb",
+)
+
+
+def is_test_path(path: str) -> bool:
+    """True if this file is, by its ecosystem's convention, a test file."""
+    p = path.replace("\\", "/").lower()
+    parts = p.split("/")
+    if any(seg in _TEST_DIRS for seg in parts[:-1]):
+        return True
+    fname = parts[-1]
+    if fname.startswith("test_") or fname.startswith("test-"):
+        return True
+    return fname.endswith(_TEST_SUFFIXES)
+
+
+def _looks_like_test(qualified: str) -> bool:
+    """Catches in-file test modules (Rust `mod tests`) and test-named callables
+    that live in a production file."""
+    q = qualified.lower()
+    return (q.startswith("test") or ".test" in q
+            or "tests." in q or q.endswith(".tests"))
+
+
+@dataclass
+class ImpactNode:
+    key: tuple             # ("sym", id) or ("mod", path) — identity in the BFS
+    symbol_id: int         # -1 for a module-scope call site
+    qualified: str
+    path: str
+    call_line: int         # where the call into the previous hop appears
+    depth: int             # hops from the changed symbol
+    uncertain: bool        # reached via at least one ambiguous name resolution
+    is_test: bool
+
+    def to_dict(self) -> dict:
+        return {"symbol_id": self.symbol_id, "qualified": self.qualified,
+                "path": self.path, "line": self.call_line, "depth": self.depth,
+                "uncertain": self.uncertain, "is_test": self.is_test}
+
+
+@dataclass
+class ImpactResult:
+    root: Symbol
+    nodes: list[ImpactNode]       # the nodes we report (may be filtered)
+    parent: dict                  # node key -> parent key (BFS tree, for chains)
+    max_depth: int
+    truncated: bool               # stopped at max_depth with frontier still growing
+    all_nodes: list[ImpactNode] = field(default_factory=list)
+    # ^ every node the BFS reached. `nodes` may be a filtered view of this (see
+    #   tests_for), but chains still have to walk through the nodes we filtered
+    #   OUT — a test reaches the symbol *through* production code, and that
+    #   intermediate hop is the entire explanation. Losing it loses the "why".
+
+    def __post_init__(self):
+        if not self.all_nodes:
+            self.all_nodes = self.nodes
+
+    def chain(self, node: ImpactNode) -> list[str]:
+        """The call path from `node` down to the changed symbol. This is the
+        'why' — the reason a test or caller is implicated at all."""
+        names: list[str] = [node.qualified]
+        key = self.parent.get(node.key)
+        index = {n.key: n for n in self.all_nodes}
+        while key is not None:
+            if key[0] == "sym" and key[1] == self.root.id:
+                names.append(self.root.qualified)
+                break
+            n = index.get(key)
+            if n is None:
+                break
+            names.append(n.qualified)
+            key = self.parent.get(key)
+        return names
+
+    @property
+    def uncertain_count(self) -> int:
+        return sum(1 for n in self.nodes if n.uncertain)
+
+    def to_dict(self) -> dict:
+        return {
+            "symbol": self.root.to_dict(),
+            "max_depth": self.max_depth,
+            "truncated": self.truncated,
+            "uncertain_count": self.uncertain_count,
+            "impacted": [dict(n.to_dict(), chain=self.chain(n)) for n in self.nodes],
+        }
+
+
 @dataclass
 class CallGraph:
     symbols: list[Symbol] = field(default_factory=list)
@@ -116,6 +220,114 @@ class CallGraph:
     def callees(self, sid: int) -> list[CallEdge]:
         """Call edges originating inside symbol sid."""
         return [e for e in self.edges if e.caller_id == sid]
+
+    # -- reverse reachability ----------------------------------------------
+
+    def _reverse(self) -> dict[int, list[CallEdge]]:
+        """callee symbol id -> the edges that call it."""
+        rev: dict[int, list[CallEdge]] = defaultdict(list)
+        for e in self.edges:
+            for sid in e.resolved:
+                rev[sid].append(e)
+        return rev
+
+    def impact(self, sid: int, max_depth: int = 3) -> "ImpactResult":
+        """Everything that transitively reaches `sid` — i.e. what could break
+        if you change its signature or behaviour.
+
+        Breadth-first over reversed call edges. Each frontier is one hop further
+        from the change site, so depth is a proxy for blast radius.
+
+        Two honesty mechanics, because this is where a name-based graph is most
+        tempted to lie:
+
+          * An edge whose callee name matched several definitions is `ambiguous`
+            — we followed it, but a type-aware resolver might not have. Ambiguity
+            is *inherited*: a node reached through any ambiguous hop is itself
+            marked uncertain, because its presence in this set is conditional on
+            a guess. Error compounds with depth; we make that visible instead of
+            flattening it into a confident-looking tree.
+
+          * Module-level call sites (caller_id == -1) are real impact — a script
+            calling the function at import time is affected too — but they have
+            no enclosing symbol to recurse into, so they're leaves.
+        """
+        rev = self._reverse()
+        root = self.symbols[sid]
+
+        # Node keys: ("sym", id) for definitions, ("mod", path) for module scope.
+        start: tuple = ("sym", sid)
+        seen: set[tuple] = {start}
+        nodes: list[ImpactNode] = []
+        parent: dict[tuple, tuple | None] = {start: None}
+
+        index: dict[tuple, ImpactNode] = {}
+        frontier: list[tuple] = [start]
+        for depth in range(1, max_depth + 1):
+            nxt: list[tuple] = []
+            for key in frontier:
+                if key[0] != "sym":
+                    continue                      # module-scope nodes are leaves
+                for e in rev.get(key[1], []):
+                    ambiguous = len(e.resolved) > 1
+                    # Inherit uncertainty from the path we arrived by.
+                    parent_node = index.get(key)
+                    if parent_node is not None and parent_node.uncertain:
+                        ambiguous = True
+
+                    if e.caller_id >= 0:
+                        nkey: tuple = ("sym", e.caller_id)
+                        sym = self.symbols[e.caller_id]
+                        qualified, npath = sym.qualified, sym.path
+                    else:
+                        nkey = ("mod", e.path)
+                        qualified, npath = f"<module {e.path}>", e.path
+
+                    if nkey in seen:
+                        continue
+                    seen.add(nkey)
+                    parent[nkey] = key
+                    node = ImpactNode(
+                        key=nkey,
+                        symbol_id=e.caller_id,
+                        qualified=qualified,
+                        path=npath,
+                        call_line=e.line,
+                        depth=depth,
+                        uncertain=ambiguous,
+                        is_test=is_test_path(npath) or _looks_like_test(qualified),
+                    )
+                    nodes.append(node)
+                    index[nkey] = node
+                    nxt.append(nkey)
+            frontier = nxt
+            if not frontier:
+                break
+
+        # Did we stop because we ran out of graph, or because we hit max_depth?
+        truncated = bool(frontier)
+        return ImpactResult(root=root, nodes=nodes, parent=parent,
+                            max_depth=max_depth, truncated=truncated,
+                            all_nodes=nodes)
+
+    def tests_for(self, sid: int, max_depth: int = 4) -> "ImpactResult":
+        """Which tests exercise this symbol.
+
+        This is impact analysis with a filter: a test covers `sid` if some test
+        function transitively calls it. Deeper default depth than `impact`,
+        because tests usually reach production code through a layer or two of
+        setup helpers — but the same ambiguity caveats apply, more so.
+
+        Absence of a result is weak evidence. A test that drives the symbol via
+        HTTP, a DI container, reflection, or a mock will not appear here — no
+        static call edge exists. Read this as 'tests that demonstrably call it',
+        never as 'the complete set of tests that cover it'.
+        """
+        full = self.impact(sid, max_depth=max_depth)
+        tests = [n for n in full.nodes if n.is_test]
+        return ImpactResult(root=full.root, nodes=tests, parent=full.parent,
+                            max_depth=max_depth, truncated=full.truncated,
+                            all_nodes=full.nodes)
 
     def symbol_at(self, path: str, start_line: int, end_line: int) -> "Symbol | None":
         """The innermost symbol in `path` overlapping [start_line, end_line].

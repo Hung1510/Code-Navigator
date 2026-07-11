@@ -101,7 +101,10 @@ def build_index(repo_path: Path, embedder: Embedder, batch_size: int = 64,
     """
     repo_path = repo_path.resolve()
     index_dir = index_dir_for(repo_path)
-    model_name = getattr(embedder, "model_name", None)
+    # Vector-space identity: the model AND its prefix scheme. Both change the
+    # geometry of the passage vectors, so both must invalidate the index.
+    model_name = (getattr(embedder, "fingerprint", None)
+                  or getattr(embedder, "model_name", None))
 
     progress(f"Scanning {repo_path} ...")
     current = _scan(repo_path)              # rel -> (abs, hash)

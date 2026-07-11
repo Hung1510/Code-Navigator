@@ -24,12 +24,20 @@ keyword search, a cross-encoder re-ranker, and a tree-sitter call graph across 9
 languages. No cloud, no API key required for MCP mode. Small enough to read in
 one sitting, structured so every piece is swappable as you go deeper.
 
+<div align="center">
+
+![CodeNavigator demo](docs/demo.gif)
+
+</div>
+
 ### Highlights
 
 - 🔌 **MCP context engine** — plug it into Claude Desktop / Claude Code / Cursor / Continue and your assistant gets precise, cited context instead of grepping and dumping whole files
 - 🔍 **Hybrid retrieval** — semantic embeddings + BM25 keyword search, fused with Reciprocal Rank Fusion, then cross-encoder re-ranked
 - 🌳 **Structure-aware chunking** via tree-sitter (Python, JS, TS/TSX, Rust, Java, C#, C++, Go) with a regex fallback
 - 🧠 **Code intelligence** — `defs` / `callers` / `callees`, plus graph-aware answers that pull in the code your matches actually call
+- 💥 **Impact analysis** — `impact` walks the call graph *transitively*: what breaks if you change this signature, not just who calls it directly
+- 🧪 **Symbol → tests** — `tests` maps a function to the tests that reach it, **and the call chain that gets them there**. Neither is something grep or a vector store can give you
 - ⚡ **Incremental indexing** — hashes files, re-embeds only what changed
 - 📊 **Eval harness** — recall@k / MRR across modes, `--scaffold` for curated sets, `--fail-under` CI gate
 - 🖥️ **CLI + desktop app** (Tauri) over one shared engine
@@ -92,7 +100,9 @@ the same command, args, and `CODENAVIGATOR_REPO` env var.
 | `search_code(query, k)` | Find code by meaning. Replaces grep + reading N files. |
 | `ask_codebase(question, k)` | Same, plus call-graph expansion — the implementation, not just the match. |
 | `get_definition(symbol)` | Where a function/class is defined. |
-| `find_callers(symbol)` | Impact analysis: what breaks if I change this. |
+| `find_callers(symbol)` | Direct call sites — one hop. |
+| `analyze_impact(symbol, depth)` | **Blast radius**: everything that *transitively* reaches it, with the chain, and an explicit uncertainty flag per result. |
+| `find_tests(symbol, depth)` | **Which tests exercise it**, and via what call chain. |
 | `find_callees(symbol)` | What an implementation depends on. |
 
 It **auto-indexes on first use** and incrementally refreshes when files change,
@@ -163,8 +173,14 @@ Structural questions, no embeddings or API key needed — built during `index`:
 
 ```bash
 codenav defs    /path/to/repo AuthService.login   # where is it defined
-codenav callers /path/to/repo issue_jwt           # what calls it
+codenav callers /path/to/repo issue_jwt           # what calls it (one hop)
 codenav callees /path/to/repo AuthService.login   # what it calls
+
+# Transitive: what breaks if I change this?
+codenav impact  /path/to/repo issue_jwt --depth 3
+
+# Which tests reach it — and through which helpers?
+codenav tests   /path/to/repo issue_jwt
 ```
 
 Same-file calls resolve exactly; cross-file calls resolve by name and report
@@ -311,6 +327,20 @@ runs with no network and no API key.
 
 ## Known limitations (tree-sitter path)
 
+- **`impact` and `tests` are heuristics, and I'd rather you know how they fail
+  than be impressed by them.** Cross-file call resolution is name-based, not
+  type-aware — there's no compiler here. Two consequences, both surfaced in the
+  output rather than hidden:
+  - *Over-reporting.* If several files define `save`, a call to `save` resolves
+    to all of them. Results reached that way are marked `?`, and the doubt is
+    **inherited** by everything downstream — error compounds with `--depth`, so
+    the tree can't quietly launder a guess into a fact three hops later.
+  - *Under-reporting.* Dynamic dispatch, reflection, DI containers, HTTP routes
+    and mocks leave no static call edge. So an empty `impact` result does **not**
+    mean a change is safe, and an empty `tests` result does **not** mean the code
+    is untested. Both say "nothing *statically* reaches this", which is a weaker
+    claim than it looks. An LSP would settle much of this; that's the upgrade
+    path, not a patch.
 - Top-level statements *between* two definitions aren't chunked (only the
   module preamble before the first definition is). Rare in the supported
   languages; the fallback windows anything with no definitions at all.

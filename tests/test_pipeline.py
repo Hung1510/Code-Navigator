@@ -454,3 +454,124 @@ if __name__ == "__main__":
     test_rrf_fusion()
     test_json_serialization()
     print("passed")
+
+
+def test_impact_is_transitive(tmp_path: Path):
+    """Impact walks the graph outward: a caller two hops up is reported, with
+    the chain that explains why. This is the thing find_callers cannot do."""
+    from codenavigator.callgraph import build_call_graph
+
+    repo = tmp_path / "repo"
+    repo.mkdir(parents=True)
+    (repo / "core.py").write_text("def issue_jwt(u):\n    return u\n")
+    (repo / "svc.py").write_text(
+        "from core import issue_jwt\n"
+        "def login(u):\n"
+        "    return issue_jwt(u)\n"
+    )
+    (repo / "api.py").write_text(
+        "from svc import login\n"
+        "def handle_request(r):\n"
+        "    return login(r)\n"
+    )
+    g = build_call_graph(repo)
+    target = next(s for s in g.symbols if s.qualified == "issue_jwt")
+
+    res = g.impact(target.id, max_depth=3)
+    reached = {n.qualified: n.depth for n in res.nodes}
+    assert reached["login"] == 1
+    assert reached["handle_request"] == 2      # direct callers would MISS this
+
+    node = next(n for n in res.nodes if n.qualified == "handle_request")
+    assert g.impact(target.id, 3).chain(node) == \
+        ["handle_request", "login", "issue_jwt"]
+
+    # Depth is a real budget, not a suggestion.
+    shallow = g.impact(target.id, max_depth=1)
+    assert {n.qualified for n in shallow.nodes} == {"login"}
+    assert shallow.truncated is True
+    print("impact OK: transitive to depth 2, chain reconstructed, depth honoured")
+
+
+def test_impact_inherits_ambiguity(tmp_path: Path):
+    """Cross-file resolution is name-based, so error COMPOUNDS with depth.
+    A node reached through an ambiguous hop must itself be marked uncertain —
+    its presence in the set is conditional on a guess we cannot verify."""
+    from codenavigator.callgraph import build_call_graph
+
+    repo = tmp_path / "repo"
+    repo.mkdir(parents=True)
+    (repo / "a.py").write_text("def save(v):\n    return v\n")
+    (repo / "b.py").write_text("def save(v):\n    return v\n")   # same name!
+    (repo / "mid.py").write_text("def persist(v):\n    return save(v)\n")
+    (repo / "top.py").write_text("def controller(v):\n    return persist(v)\n")
+    g = build_call_graph(repo)
+
+    a_save = next(s for s in g.symbols if s.path == "a.py" and s.name == "save")
+    res = g.impact(a_save.id, max_depth=3)
+    by_name = {n.qualified: n for n in res.nodes}
+
+    # 'save' matched two defs, so reaching persist required a guess.
+    assert by_name["persist"].uncertain is True
+    # ...and controller sits downstream of that guess, so it inherits the doubt.
+    assert by_name["controller"].uncertain is True
+    assert res.uncertain_count == 2
+    print("impact OK: ambiguity inherited downstream, not silently laundered")
+
+
+def test_find_tests_maps_symbol_to_tests(tmp_path: Path):
+    """Tests are found through helpers, and non-test callers are excluded."""
+    from codenavigator.callgraph import build_call_graph, is_test_path
+
+    repo = tmp_path / "repo"
+    (repo / "tests").mkdir(parents=True)
+    (repo / "core.py").write_text("def refresh_token(t):\n    return t\n")
+    (repo / "helpers.py").write_text(
+        "from core import refresh_token\n"
+        "def make_session(t):\n"
+        "    return refresh_token(t)\n"
+    )
+    (repo / "prod.py").write_text(
+        "from core import refresh_token\n"
+        "def endpoint(t):\n"
+        "    return refresh_token(t)\n"
+    )
+    (repo / "tests" / "test_auth.py").write_text(
+        "from helpers import make_session\n"
+        "def test_refresh():\n"
+        "    assert make_session('x')\n"
+    )
+    g = build_call_graph(repo)
+    target = next(s for s in g.symbols if s.qualified == "refresh_token")
+
+    res = g.tests_for(target.id, max_depth=3)
+    names = {n.qualified for n in res.nodes}
+    assert names == {"test_refresh"}           # reached via a helper, 2 hops
+    assert "endpoint" not in names             # production caller, not a test
+
+    node = next(iter(res.nodes))
+    # The chain must survive the test-only filter — the helper is the *reason*.
+    assert res.chain(node) == ["test_refresh", "make_session", "refresh_token"]
+
+    assert is_test_path("tests/test_auth.py")
+    assert is_test_path("src/foo.test.ts")
+    assert is_test_path("pkg/thing_test.go")
+    assert not is_test_path("src/latest_news.py")   # 'test' inside a word != test
+    print("tests_for OK: found via helper, chain intact, prod caller excluded")
+
+
+def test_find_tests_absence_is_not_proof(tmp_path: Path):
+    """A symbol with no static test edge returns empty — the CLI/MCP layer is
+    responsible for not calling that 'untested'. Pin the empty case so the
+    honest-reporting contract stays visible."""
+    from codenavigator.callgraph import build_call_graph
+
+    repo = tmp_path / "repo"
+    repo.mkdir(parents=True)
+    (repo / "core.py").write_text("def orphan(x):\n    return x\n")
+    g = build_call_graph(repo)
+    target = next(s for s in g.symbols if s.qualified == "orphan")
+    res = g.tests_for(target.id)
+    assert res.nodes == []
+    assert res.truncated is False
+    print("tests_for OK: empty result, reported as empty (not as 'safe')")
