@@ -65,7 +65,7 @@ Enter
 Type "codenav search . 'how are vector and keyword results fused?' -k 3"
 Sleep 700ms
 Enter
-Wait+Screen@30s /\$ $/
+Sleep 3s
 Sleep 3500ms
 
 Type "clear"
