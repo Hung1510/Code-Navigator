@@ -15,7 +15,7 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install
-        run: pip install -e ".[treesitter]" pytest
+        run: pip install -e ".[treesitter,mcp]" pytest
       - name: Unit tests
         run: python -m pytest -q
 
