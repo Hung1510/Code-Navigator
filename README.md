@@ -2,25 +2,31 @@
 
 # 🧭 CodeNavigator
 
-**Ask your codebase in plain language — local RAG + code intelligence, no cloud.**
+**A local, MCP-native context engine for your codebase — so your AI assistant stops guessing.**
 
 [![CI](https://github.com/Hung1510/Code-Navigator/actions/workflows/ci.yml/badge.svg)](https://github.com/Hung1510/Code-Navigator/actions/workflows/ci.yml)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![MCP](https://img.shields.io/badge/MCP-native-6f42c1.svg)](#-use-it-as-an-mcp-context-engine)
 [![Grammars](https://img.shields.io/badge/tree--sitter-9%20languages-8a2be2.svg)](#)
 [![Embeddings](https://img.shields.io/badge/embeddings-ONNX%20·%20no%20PyTorch-orange.svg)](#)
 
 </div>
 
-Point CodeNavigator at any repo and ask *"where's the JWT refresh handled?"* or
-*"what calls `issue_jwt`?"* — it answers with citations to real `file:line`
-locations. Everything runs locally: ONNX embeddings on CPU, a transparent vector
-store, BM25 keyword search, a cross-encoder re-ranker, and a tree-sitter call
-graph across 9 languages. Small enough to read in one sitting, structured so
-every piece is swappable as you go deeper.
+Plug it into **Claude Desktop, Claude Code, Cursor, or Continue** and your
+assistant gets precise, cited context from your repo — instead of grepping around
+and dumping whole files into its context window. Or use it standalone: ask
+*"where's the JWT refresh handled?"* or *"what calls `issue_jwt`?"* from the CLI
+and get answers with `file:line` citations.
+
+Everything runs locally: ONNX embeddings on CPU, a transparent vector store, BM25
+keyword search, a cross-encoder re-ranker, and a tree-sitter call graph across 9
+languages. No cloud, no API key required for MCP mode. Small enough to read in
+one sitting, structured so every piece is swappable as you go deeper.
 
 ### Highlights
 
+- 🔌 **MCP context engine** — plug it into Claude Desktop / Claude Code / Cursor / Continue and your assistant gets precise, cited context instead of grepping and dumping whole files
 - 🔍 **Hybrid retrieval** — semantic embeddings + BM25 keyword search, fused with Reciprocal Rank Fusion, then cross-encoder re-ranked
 - 🌳 **Structure-aware chunking** via tree-sitter (Python, JS, TS/TSX, Rust, Java, C#, C++, Go) with a regex fallback
 - 🧠 **Code intelligence** — `defs` / `callers` / `callees`, plus graph-aware answers that pull in the code your matches actually call
@@ -28,7 +34,84 @@ every piece is swappable as you go deeper.
 - 📊 **Eval harness** — recall@k / MRR across modes, `--scaffold` for curated sets, `--fail-under` CI gate
 - 🖥️ **CLI + desktop app** (Tauri) over one shared engine
 
-## Quick start
+## 🔌 Use it as an MCP context engine
+
+This is the main event. Plug CodeNavigator into any MCP host and your AI
+assistant stops grepping around your filesystem and dumping whole files into its
+context. Instead it asks one question and gets a handful of ranked, deduplicated
+chunks with `path:line` citations — plus the code those matches actually *call*,
+via the call graph.
+
+**It returns context, not answers.** The host's model does the reasoning, so the
+MCP server needs **no API key**. Everything stays on your machine.
+
+```bash
+pip install -e ".[treesitter,mcp]"
+```
+
+### Claude Desktop
+
+Settings → Developer → Edit Config, then add:
+
+```json
+{
+  "mcpServers": {
+    "codenavigator": {
+      "command": "/absolute/path/to/.venv/bin/python",
+      "args": ["-m", "codenavigator.mcp_server"],
+      "env": {
+        "CODENAVIGATOR_REPO": "/absolute/path/to/the/repo/you/want/to/ask/about"
+      }
+    }
+  }
+}
+```
+
+On Windows use the full interpreter path, e.g.
+`"command": "D:\\Project_Programming\\CodeNavigator\\.venv\\Scripts\\python.exe"`.
+Use **absolute paths** — the host spawns the server as a subprocess and won't
+resolve `python` from your shell's PATH. Restart the host after editing.
+
+### Claude Code
+
+```bash
+claude mcp add codenavigator \
+  -e CODENAVIGATOR_REPO=/path/to/repo \
+  -- /path/to/.venv/bin/python -m codenavigator.mcp_server
+```
+
+### Cursor / Continue / VS Code Copilot Agent
+
+Same shape — point the host's MCP config (`~/.cursor/mcp.json` for Cursor) at
+the same command, args, and `CODENAVIGATOR_REPO` env var.
+
+### Tools it exposes
+
+| Tool | What it's for |
+|---|---|
+| `search_code(query, k)` | Find code by meaning. Replaces grep + reading N files. |
+| `ask_codebase(question, k)` | Same, plus call-graph expansion — the implementation, not just the match. |
+| `get_definition(symbol)` | Where a function/class is defined. |
+| `find_callers(symbol)` | Impact analysis: what breaks if I change this. |
+| `find_callees(symbol)` | What an implementation depends on. |
+
+It **auto-indexes on first use** and incrementally refreshes when files change,
+so you never have to remember to re-index. Every response is **budget-capped**
+(`CODENAVIGATOR_MAX_CHARS`, default 6000) with truncation markers that keep the
+locator, so the model can always read further if it needs to.
+
+| Env var | Default | Purpose |
+|---|---|---|
+| `CODENAVIGATOR_REPO` | `.` | Which repo the server serves |
+| `CODENAVIGATOR_MAX_CHARS` | `6000` | Total response budget |
+| `CODENAVIGATOR_MAX_CHUNK_CHARS` | `1800` | Per-chunk truncation cap |
+| `CODENAVIGATOR_RERANK` | `1` | Set `0` to skip the cross-encoder |
+
+**On "token savings":** retrieval doesn't beat a well-scoped question — it beats
+the agent loop where the model greps, reads five files, and pastes them whole.
+That's where the savings are, and that's the honest pitch: *precision context*.
+
+## Quick start (CLI)
 
 ```bash
 cd CodeNavigator

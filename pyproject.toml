@@ -12,6 +12,9 @@ dependencies = [
 # Structure-aware chunking via real parse trees. Optional: without it,
 # CodeNavigator falls back to the regex heuristic. Precompiled wheels, no C compiler.
 [project.optional-dependencies]
+mcp = [
+    "mcp>=1.27,<2",
+]
 treesitter = [
     "tree-sitter>=0.23",
     "tree-sitter-python",
@@ -26,6 +29,7 @@ treesitter = [
 
 [project.scripts]
 codenav = "codenavigator.cli:main"
+codenav-mcp = "codenavigator.mcp_server:main"
 
 [build-system]
 requires = ["setuptools>=68"]
