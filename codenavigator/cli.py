@@ -173,10 +173,81 @@ def cmd_callers(args) -> int:
     return 0
 
 
+def _targets(g, args):
+    """The symbols to analyze: either the ones a diff touched, or the one named
+    on the command line."""
+    if getattr(args, "diff", None):
+        return _symbols_from_diff(g, args)
+    if not args.symbol:
+        raise SystemExit("Give a symbol name, or use --diff to analyze your "
+                         "current changes.")
+    return _match_or_report(g, args.symbol) if not args.json else g.find(args.symbol)
+
+
+def _symbols_from_diff(g, args):
+    """Resolve `--diff` into the set of changed symbols, or exit with a clear
+    reason. Returns None if the diff yields nothing to analyze."""
+    from .gitdiff import (GitError, changed_symbols, diff_changes, is_git_repo,
+                          stale_files)
+    from .index import _load_manifest, index_dir_for
+
+    repo = Path(args.repo)
+    if not is_git_repo(repo):
+        raise SystemExit(f"{args.repo} is not a git repository — --diff needs git.")
+
+    rev = None if args.diff is True else args.diff
+    try:
+        changes = diff_changes(repo, rev=rev, staged=args.staged)
+    except GitError as e:
+        raise SystemExit(f"git: {e}")
+
+    if not changes:
+        print("No changes found. Nothing to analyze.")
+        return None
+
+    # Guardrail: diff line numbers describe the working tree; symbol spans come
+    # from the index. If a changed file was edited after indexing, its spans
+    # have shifted and every mapping in it is quietly wrong. Refuse, don't guess.
+    manifest = _load_manifest(index_dir_for(repo))
+    stale = stale_files(repo, manifest.get("files", {}), changes)
+    if stale:
+        print("The index is out of date for these changed files:")
+        for p in sorted(stale)[:10]:
+            print(f"  {p}")
+        if len(stale) > 10:
+            print(f"  ... and {len(stale) - 10} more")
+        print("\nTheir line numbers have shifted since indexing, so mapping the\n"
+              "diff onto symbols would point at the wrong functions. Re-index\n"
+              f"first:\n\n  codenav index {args.repo}\n")
+        raise SystemExit(1)
+
+    symbols, unmapped = changed_symbols(g, changes)
+    deleted_hunks = sum(c.deletion_only_hunks for c in changes)
+
+    print(f"Diff touches {len(changes)} file(s) -> {len(symbols)} changed symbol(s):")
+    for s in sorted(symbols, key=lambda x: (x.path, x.start_line)):
+        print(f"  {s.qualified:<40} {s.locator()}")
+    if unmapped:
+        print(f"\n  {len(unmapped)} changed file(s) map to no symbol "
+              f"(module-level edits, new files, or unsupported grammars):")
+        for p in sorted(unmapped)[:8]:
+            print(f"    {p}")
+        print("  The graph has nothing to say about these — which is NOT the "
+              "same as them being safe.")
+    if deleted_hunks:
+        print(f"\n  {deleted_hunks} deletion-only hunk(s). Deleted code is gone "
+              f"from the working tree, so it has no symbol in the current index "
+              f"— anything that called it will NOT show up below.")
+    if not symbols:
+        return None
+    print()
+    return symbols
+
+
 def cmd_impact(args) -> int:
     """Blast radius: everything that transitively reaches this symbol."""
     g = _load_graph_or_exit(args.repo)
-    matches = _match_or_report(g, args.symbol) if not args.json else g.find(args.symbol)
+    matches = _targets(g, args)
     if not matches:
         if args.json:
             print(json.dumps([]))
@@ -218,7 +289,7 @@ def cmd_impact(args) -> int:
 def cmd_tests(args) -> int:
     """Which tests demonstrably call this symbol, and via what chain."""
     g = _load_graph_or_exit(args.repo)
-    matches = _match_or_report(g, args.symbol) if not args.json else g.find(args.symbol)
+    matches = _targets(g, args)
     if not matches:
         if args.json:
             print(json.dumps([]))
@@ -363,12 +434,24 @@ def build_parser() -> argparse.ArgumentParser:
     ):
         pg = sub.add_parser(verb, help=helptext)
         pg.add_argument("repo")
-        pg.add_argument("symbol")
+        if verb in ("impact", "tests"):
+            pg.add_argument("symbol", nargs="?", default=None,
+                            help="symbol to analyze (omit when using --diff)")
+        else:
+            pg.add_argument("symbol")
         pg.add_argument("--json", action="store_true", help="emit JSON")
         if verb in ("impact", "tests"):
             pg.add_argument("--depth", type=int, default=3 if verb == "impact" else 4,
                             help="how many call hops to walk outward "
                                  "(deeper = wider net, more false positives)")
+            pg.add_argument("--diff", nargs="?", const=True, default=None,
+                            metavar="REV",
+                            help="analyze what YOU changed instead of a named "
+                                 "symbol. Bare --diff = working tree vs HEAD; "
+                                 "--diff HEAD~1 = since that revision.")
+            pg.add_argument("--staged", action="store_true",
+                            help="with --diff: use staged changes (git add'ed) "
+                                 "rather than the working tree")
         pg.set_defaults(func=fn)
 
     pa = sub.add_parser("ask", help="ask a question (retrieval + Claude)")

@@ -183,6 +183,46 @@ codenav impact  /path/to/repo issue_jwt --depth 3
 codenav tests   /path/to/repo issue_jwt
 ```
 
+### What did *I* just break? (`--diff`)
+
+Nobody wakes up wondering what calls `issue_jwt`. They wonder: **I changed five
+files — what did I put at risk, and what should I run?** `--diff` maps your git
+diff onto the call graph and answers that:
+
+```bash
+codenav impact /path/to/repo --diff             # working tree vs HEAD
+codenav impact /path/to/repo --diff HEAD~1      # since that revision
+codenav impact /path/to/repo --diff --staged    # only what you `git add`ed
+codenav tests  /path/to/repo --diff             # -> the tests to run first
+```
+
+```
+Diff touches 1 file(s) -> 1 changed symbol(s):
+  issue_jwt                                core.py:1-2
+
+Changing issue_jwt  (core.py:1-2)
+  3 symbol(s) affected within 3 hop(s)  —  1 test(s), 0 uncertain
+
+  depth 1:
+      login                                      svc.py:3
+  depth 2:
+      handle_login                               api.py:3
+      test_login_flow                            tests/test_auth.py:3 [test]
+```
+
+Two things it refuses to do:
+
+- **It won't map a diff onto a stale index.** Diff line numbers describe the
+  working tree; symbol spans come from the index. If you edited a file after
+  indexing, the spans have shifted and "line 47" now points at the wrong
+  function — an answer that looks completely reasonable and is wrong. It
+  detects this and tells you to re-index instead of guessing.
+- **It won't call the test list sufficient.** These are the tests that
+  *statically call* your changed code. Anything driven over HTTP, through DI,
+  or via mocks leaves no call edge. Read it as "run these first", never as
+  "skip the rest".
+```
+
 Same-file calls resolve exactly; cross-file calls resolve by name and report
 all candidates when a name is defined in several places. Add `--json` to any.
 

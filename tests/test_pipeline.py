@@ -575,3 +575,105 @@ def test_find_tests_absence_is_not_proof(tmp_path: Path):
     assert res.nodes == []
     assert res.truncated is False
     print("tests_for OK: empty result, reported as empty (not as 'safe')")
+
+
+def _git_fixture(tmp_path: Path) -> Path:
+    """A tiny git repo: issue_jwt <- login <- {handle_login, test_login_flow}."""
+    import subprocess
+    repo = tmp_path / "gitrepo"
+    (repo / "tests").mkdir(parents=True)
+    (repo / "core.py").write_text("def issue_jwt(user):\n    return {'sub': user}\n")
+    (repo / "svc.py").write_text(
+        "from core import issue_jwt\ndef login(u):\n    return issue_jwt(u)\n")
+    (repo / "api.py").write_text(
+        "from svc import login\ndef handle_login(r):\n    return login(r)\n")
+    (repo / "tests" / "test_auth.py").write_text(
+        "from svc import login\ndef test_login_flow():\n    assert login('bob')\n")
+    for args in (["init", "-q"], ["config", "user.email", "t@t.t"],
+                 ["config", "user.name", "t"], ["add", "-A"],
+                 ["commit", "-qm", "init"]):
+        subprocess.run(["git", "-C", str(repo), *args], check=True,
+                       capture_output=True)
+    return repo
+
+
+def test_diff_maps_changed_lines_to_symbols(tmp_path: Path):
+    """The workflow question: I changed some lines — what did I break?"""
+    from codenavigator.callgraph import build_call_graph
+    from codenavigator.gitdiff import changed_symbols, diff_changes
+
+    repo = _git_fixture(tmp_path)
+    # Edit the body of issue_jwt (line 2), leaving the signature alone.
+    (repo / "core.py").write_text(
+        "def issue_jwt(user):\n    return {'sub': user, 'iat': 0}\n")
+
+    changes = diff_changes(repo)
+    assert [c.path for c in changes] == ["core.py"]
+
+    g = build_call_graph(repo)
+    syms, unmapped = changed_symbols(g, changes)
+    assert [s.qualified for s in syms] == ["issue_jwt"]
+    assert unmapped == []
+
+    # ...and the diff composes with impact: the test is 2 hops away.
+    res = g.impact(syms[0].id, max_depth=3)
+    reached = {n.qualified for n in res.nodes}
+    assert {"login", "handle_login", "test_login_flow"} <= reached
+    tests = {n.qualified for n in g.tests_for(syms[0].id).nodes}
+    assert tests == {"test_login_flow"}
+    print("diff OK: changed line -> symbol -> blast radius -> the test to run")
+
+
+def test_diff_detects_stale_index(tmp_path: Path):
+    """The guardrail that matters most. Diff line numbers describe the working
+    tree; symbol spans come from the index. If a file was edited after indexing,
+    the spans have shifted and every mapping in it is confidently wrong. We must
+    detect that rather than answer from bad spans."""
+    from codenavigator.gitdiff import diff_changes, stale_files
+    from codenavigator.index import _hash_file
+
+    repo = _git_fixture(tmp_path)
+    # Pretend we indexed the repo as it was at commit time.
+    indexed = {"core.py": _hash_file(repo / "core.py")}
+
+    # No edit yet -> nothing stale.
+    (repo / "svc.py").write_text(
+        "from core import issue_jwt\ndef login(u):\n    return issue_jwt(u)  # touched\n")
+    changes = diff_changes(repo)
+    assert stale_files(repo, indexed, changes) == ["svc.py"]   # never indexed
+
+    # Now edit an indexed file -> hash mismatch -> stale.
+    (repo / "core.py").write_text("# a new leading line\ndef issue_jwt(user):\n"
+                                  "    return {'sub': user}\n")
+    changes = diff_changes(repo)
+    stale = stale_files(repo, indexed, changes)
+    assert "core.py" in stale
+    print("diff OK: stale index detected instead of silently mapping bad spans")
+
+
+def test_diff_reports_unmapped_and_deletions(tmp_path: Path):
+    """Changes the graph can't speak to are reported, not swallowed. An empty
+    impact set must never be mistaken for 'safe'."""
+    from codenavigator.callgraph import build_call_graph
+    from codenavigator.gitdiff import changed_symbols, diff_changes
+
+    import subprocess
+    repo = _git_fixture(tmp_path)
+    # A tracked non-source change: you committed it deliberately, so it should
+    # be reported. (Untracked junk is filtered out — that would just be noise.)
+    (repo / "config.ini").write_text("[x]\ny = 1\n")
+    subprocess.run(["git", "-C", str(repo), "add", "config.ini"], check=True,
+                   capture_output=True)
+    (repo / "core.py").write_text("def issue_jwt(user):\n"    # hash_pw-less; pure add
+                                  "    return {'sub': user}\n\n"
+                                  "def brand_new(x):\n    return x\n")
+
+    changes = diff_changes(repo)
+    paths = {c.path for c in changes}
+    assert "config.ini" in paths
+
+    g = build_call_graph(repo)
+    syms, unmapped = changed_symbols(g, changes)
+    assert "config.ini" in unmapped            # changed, but graph is silent on it
+    assert "brand_new" in {s.qualified for s in syms}
+    print("diff OK: unmapped files surfaced rather than silently dropped")

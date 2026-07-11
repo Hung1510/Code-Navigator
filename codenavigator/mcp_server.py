@@ -227,6 +227,101 @@ def get_definition(symbol: str) -> str:
 
 
 @mcp.tool()
+def impact_of_changes(rev: str = "", depth: int = 3, staged: bool = False) -> str:
+    """What did the current changes put at risk, and which tests should run?
+
+    Maps the repo's git diff onto the call graph: changed lines -> the symbols
+    that contain them -> everything that transitively reaches those symbols.
+    Use this AFTER editing code (including after you have edited it yourself),
+    to check what else is affected and what to re-run.
+
+    IMPORTANT — how to report the test list. The tests found here are the ones
+    that STATICALLY call the changed code. Tests that exercise it over HTTP,
+    through dependency injection, via mocks, or through a framework fixture
+    leave no call edge and will be missing. So present the result as "run these
+    first", never as "these are sufficient" — do not tell the user it is safe to
+    skip the rest of the suite. Results marked [?] were reached through an
+    ambiguous name match and are candidates, not facts.
+
+    Args:
+        rev: Revision to diff against. Empty = working tree vs HEAD (what you
+             are about to commit). "HEAD~1" = everything since that revision.
+        depth: Call hops to walk outward from each changed symbol.
+        staged: Diff only staged (git add'ed) changes instead of the working tree.
+    """
+    err = _ensure_index()
+    if err:
+        return err
+    graph = load_graph(index_dir_for(REPO))
+    if graph is None:
+        return "No call graph available. Re-index the repository."
+
+    from .gitdiff import (GitError, changed_symbols, diff_changes, is_git_repo,
+                          stale_files)
+    from .index import _load_manifest
+
+    if not is_git_repo(REPO):
+        return "This repository is not a git repo, so there is no diff to analyze."
+    try:
+        changes = diff_changes(REPO, rev=rev or None, staged=staged)
+    except GitError as e:
+        return f"git failed: {e}"
+    if not changes:
+        return "No changes in the working tree. Nothing to analyze."
+
+    # Diff line numbers describe the working tree; symbol spans come from the
+    # index. If they disagree, every mapping is wrong in a plausible-looking
+    # way. Say so rather than answering from shifted spans.
+    stale = stale_files(REPO, _load_manifest(index_dir_for(REPO)).get("files", {}),
+                        changes)
+    if stale:
+        return ("The index is stale for these changed files, so their line "
+                "numbers no longer line up with the indexed symbol spans: "
+                + ", ".join(sorted(stale)[:10])
+                + ". Re-index before trusting an impact analysis — mapping the "
+                  "diff onto shifted spans would point at the wrong functions.")
+
+    symbols, unmapped = changed_symbols(graph, changes)
+    deleted = sum(c.deletion_only_hunks for c in changes)
+
+    out: list[str] = [f"{len(changes)} changed file(s), "
+                      f"{len(symbols)} changed symbol(s)."]
+    if unmapped:
+        out.append(f"No symbol covers the changes in: {', '.join(sorted(unmapped)[:8])}"
+                   f" — module-level edits or unsupported grammars. The graph has "
+                   f"nothing to say about these; that is not the same as safe.")
+    if deleted:
+        out.append(f"{deleted} deletion-only hunk(s): the removed code is no "
+                   f"longer in the index, so its callers do NOT appear below.")
+    if not symbols:
+        return "\n".join(out)
+
+    all_tests: set[str] = set()
+    for s in symbols:
+        res = graph.impact(s.id, max_depth=depth)
+        out.append(f"\n{s.qualified} ({s.locator()}) — {len(res.nodes)} affected, "
+                   f"{res.uncertain_count} uncertain:")
+        for n in sorted(res.nodes, key=lambda x: (x.depth, x.path)):
+            mark = "[?] " if n.uncertain else ""
+            tag = " [test]" if n.is_test else ""
+            out.append(f"  {mark}depth {n.depth}: {n.qualified} "
+                       f"at {n.path}:{n.call_line}{tag}")
+            if n.is_test:
+                all_tests.add(f"{n.path}::{n.qualified}")
+        if res.truncated:
+            out.append(f"  (frontier still growing at depth {depth} — the real "
+                       f"blast radius is larger than shown)")
+
+    if all_tests:
+        out.append("\nRun these first (NOT a sufficient set — see above):")
+        out.extend(f"  {t}" for t in sorted(all_tests))
+    else:
+        out.append("\nNo test statically reaches the changed code. That is weak "
+                   "evidence of missing coverage, not proof of it.")
+    return "\n".join(out)
+
+
+@mcp.tool()
 def analyze_impact(symbol: str, depth: int = 3) -> str:
     """Blast radius of a change: everything that TRANSITIVELY reaches a symbol,
     not just its direct callers. Use before editing a function's signature or
