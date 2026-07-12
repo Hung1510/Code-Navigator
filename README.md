@@ -32,15 +32,15 @@ one sitting, structured so every piece is swappable as you go deeper.
 
 ### Highlights
 
-- 🔌 **MCP context engine** - plug it into Claude Desktop / Claude Code / Cursor / Continue and your assistant gets precise, cited context instead of grepping and dumping whole files
-- 🔍 **Hybrid retrieval** - semantic embeddings + BM25 keyword search, fused with Reciprocal Rank Fusion, then cross-encoder re-ranked
-- 🌳 **Structure-aware chunking** via tree-sitter (Python, JS, TS/TSX, Rust, Java, C#, C++, Go) with a regex fallback
-- 🧠 **Code intelligence** - `defs` / `callers` / `callees`, plus graph-aware answers that pull in the code your matches actually call
-- 💥 **Impact analysis** - `impact` walks the call graph *transitively*: what breaks if you change this signature, not just who calls it directly
-- 🧪 **Symbol → tests** - `tests` maps a function to the tests that reach it, **and the call chain that gets them there**. Neither is something grep or a vector store can give you
-- ⚡ **Incremental indexing** - hashes files, re-embeds only what changed
-- 📊 **Eval harness** - recall@k / MRR across modes, `--scaffold` for curated sets, `--fail-under` CI gate
-- 🖥️ **CLI + desktop app** (Tauri) over one shared engine
+- **MCP context engine** - plug it into Claude Desktop / Claude Code / Cursor / Continue and your assistant gets precise, cited context instead of grepping and dumping whole files
+- **Hybrid retrieval** - semantic embeddings + BM25 keyword search, fused with Reciprocal Rank Fusion, then cross-encoder re-ranked
+- **Structure-aware chunking** via tree-sitter (Python, JS, TS/TSX, Rust, Java, C#, C++, Go) with a regex fallback
+- **Code intelligence** - `defs` / `callers` / `callees`, plus graph-aware answers that pull in the code your matches actually call
+- **Impact analysis** - `impact` walks the call graph *transitively*: what breaks if you change this signature, not just who calls it directly
+- **Symbol → tests** - `tests` maps a function to the tests that reach it, **and the call chain that gets them there**. Neither is something grep or a vector store can give you
+- **Incremental indexing** - hashes files, re-embeds only what changed
+- **Eval harness** - recall@k / MRR across modes, `--scaffold` for curated sets, `--fail-under` CI gate
+- **CLI + desktop app** (Tauri) over one shared engine
 
 ## 🔌 Use it as an MCP context engine
 
@@ -103,6 +103,7 @@ the same command, args, and `CODENAVIGATOR_REPO` env var.
 | `find_callers(symbol)` | Direct call sites - one hop. |
 | `analyze_impact(symbol, depth)` | **Blast radius**: everything that *transitively* reaches it, with the chain, and an explicit uncertainty flag per result. |
 | `find_tests(symbol, depth)` | **Which tests exercise it**, and via what call chain. |
+| `impact_of_changes(rev, depth)` | **What did I just break?** Maps the git diff onto the call graph - the tool an assistant calls *after it edits your code*. |
 | `find_callees(symbol)` | What an implementation depends on. |
 
 It **auto-indexes on first use** and incrementally refreshes when files change,
@@ -252,6 +253,26 @@ only, real BM25) across a few repos: recall@10 lands 0.94–1.0, but recall@1
 varies a lot by repo - low recall@1 with high recall@10 is the signature of
 similarly-named symbols, and the repo where semantic retrieval helps most.
 
+### What is *not* yet measured
+
+Those are **lexical-only** numbers. The vector, hybrid and rerank paths have not
+been benchmarked with the real BGE model on these repos yet, which means the
+claims above about hybrid retrieval and re-ranking are **architectural, not
+empirical**. I'd rather say that plainly than let a benchmark table imply
+something I haven't run.
+
+`scripts/calibrate.py` is the run that settles it. It ablates the prefix scheme
+(each scheme needs its own index - the passage prefix changes the document
+vectors), scores every mode, and derives CI thresholds from the binomial
+standard error at your actual dataset size instead of a round number:
+
+```bash
+python scripts/calibrate.py . --prefixes bge,e5,none --rerank -k 10
+```
+
+The numbers will land here when they exist. If dense retrieval turns out not to
+beat BM25 on identifier-heavy code, that goes here too.
+
 **Scaffold a curated set** so you're not starting from a blank file - it emits
 template rows for the repo's meatier functions with real paths/lines to attach
 questions to:
@@ -272,8 +293,19 @@ codenav eval /path/to/repo --check-mode hybrid \
 ```
 
 `.github/workflows/ci.yml` wires this up: one job runs the unit tests, a second
-indexes a corpus and runs the gate (calibrate the thresholds after the first
-green run - set them ~10–15% below your observed numbers).
+indexes a corpus and runs the gate. Don't eyeball the thresholds -
+`scripts/calibrate.py` prints suggested floors derived from the binomial
+standard error at your actual `n`. Two caveats worth knowing before you trust a
+green build:
+
+- **The gate's corpus is this repo's own source, and the gold set is derived
+  from it.** So a PR that renames a function moves the dataset *and* the corpus
+  at once, and the gate can't tell a retrieval regression from ordinary
+  refactoring. Pin it to a fixed fixture repo if you want the numbers to mean
+  one thing.
+- **`n` is small** (~82 items on this repo), so the 2-sigma band is roughly ±10
+  points. A floor set tighter than that will fail on noise, and you will learn
+  to ignore it.
 
 ## How it works (the four moving parts)
 
@@ -294,8 +326,13 @@ green run - set them ~10–15% below your observed numbers).
   produce identical `Chunk` objects. Supported grammars: Python, JS, TS/TSX,
   Rust, Java, C#, C++, Go. *This is where 80% of retrieval quality is won.*
 - **`embedder.py`** - wraps [fastembed](https://github.com/qdrant/fastembed)
-  (ONNX, CPU, no PyTorch). Default `BAAI/bge-small-en-v1.5`, 384-dim. Uses
-  BGE's query/passage prefixes, which measurably improves retrieval.
+  (ONNX, CPU, no PyTorch). Default `BAAI/bge-small-en-v1.5`, 384-dim.
+  Instruction prefixes are a **selectable scheme** (`--prefix bge|e5|none`), not
+  a hardcoded guess: BGE wants a query instruction and *no* passage prefix,
+  while E5 wants `"query: "` / `"passage: "`. fastembed applies neither on your
+  behalf, so the choice is yours to get right - and it's an empirical question,
+  so `scripts/calibrate.py` measures it rather than asserting it. The prefix is
+  part of the index fingerprint, so changing it forces a rebuild.
 - **`store.py`** - a vector store you can see through: unit vectors in a numpy
   matrix, metadata in SQLite, "search" is one dot product + argsort. This is
   what a vector DB *is*, minus the marketing.
@@ -360,9 +397,21 @@ runs with no network and no API key.
 9. ~~Exclude built/vendored copies from indexing~~ - **done**
    (`.codenavigatorignore`, gitignore-flavored, honored by indexing, the call
    graph, and eval). Duplicate copies are a measurable recall drag.
-10. **Swap the store** - LanceDB/Qdrant behind the `VectorStore` interface once
+10. ~~Impact analysis + symbol->tests~~ - **done** (`callgraph.py`: `impact`,
+    `tests`, transitive with inherited uncertainty flags).
+11. ~~Git-aware `--diff` mode~~ - **done** (`gitdiff.py`): map your working-tree
+    diff onto the call graph, and expose it over MCP as `impact_of_changes` so
+    an assistant can check its own edits. Refuses to run against a stale index
+    rather than answering from shifted line numbers.
+12. **Run the real-model eval** - the live TODO. `scripts/calibrate.py` exists;
+    the numbers don't yet. Until it runs, the retrieval claims above are
+    unbacked.
+13. **Import-aware call resolution** - resolve `from x import y` instead of
+    matching on bare names. This is what collapses the `?` ambiguity flags and
+    makes `--diff` trustworthy enough for CI test-selection.
+14. **Swap the store** - LanceDB/Qdrant behind the `VectorStore` interface once
     you outgrow brute-force numpy (~50k+ chunks).
-11. **Desktop graph panel + streaming progress** - expose the graph verbs in the
+15. **Desktop graph panel + streaming progress** - expose the graph verbs in the
     Tauri app (the `--json` output is ready) and stream index progress as events.
 
 ## Known limitations (tree-sitter path)
